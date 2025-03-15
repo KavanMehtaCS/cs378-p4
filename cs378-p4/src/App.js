@@ -1,141 +1,150 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Line } from 'react-chartjs-2';
+import React, { useState, useEffect } from 'react';
+import { Bar } from 'react-chartjs-2';
 import 'chart.js/auto';
 
 function App() {
-  const [weatherData, setWeatherData] = useState([]);
-  const [currentCity, setCurrentCity] = useState('Austin');
+  const [transactions, setTransactions] = useState([]);
+  const [representative, setRepresentative] = useState('Nancy Pelosi'); // Default representative
   const [error, setError] = useState('');
-  const [cityInput, setCityInput] = useState('');
-  const [astronomyData, setAstronomyData] = useState({});
-  const [customCities, setCustomCities] = useState([]);
+  const [customRepresentatives, setCustomRepresentatives] = useState([]);
+  const [repInput, setRepInput] = useState('');
 
-  const cities = {
-    Austin: { latitude: 30.2672, longitude: -97.7431 },
-    Dallas: { latitude: 32.7767, longitude: -96.7970 },
-    Houston: { latitude: 29.7604, longitude: -95.3698 },
+  // API Endpoint
+  const allTransactionsEndpoint =
+    'https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json';
+
+  // Default representatives
+  const defaultRepresentatives = ['Nancy Pelosi', 'Ro Khanna', 'Dan Crenshaw'];
+
+  // Fetch transactions for the selected representative
+  const fetchTransactions = async (repName) => {
+    try {
+      setError('');
+      const response = await fetch(allTransactionsEndpoint);
+      if (!response.ok) throw new Error('Failed to fetch transactions.');
+      const data = await response.json();
+
+      // Filter transactions for the selected representative
+      let filteredTransactions = data.filter(
+        (transaction) => transaction.representative.toLowerCase() === repName.toLowerCase()
+      );
+
+      if (filteredTransactions.length === 0) {
+        throw new Error(`No transactions found for "${repName}". Please enter a valid representative.`);
+      }
+
+      // Remove duplicate stock tickers and sort by transaction amount (highest to lowest)
+      const uniqueTransactions = [];
+      const seenTickers = new Set();
+
+      filteredTransactions.forEach((transaction) => {
+        if (!seenTickers.has(transaction.ticker)) {
+          seenTickers.add(transaction.ticker);
+          uniqueTransactions.push(transaction);
+        }
+      });
+
+      uniqueTransactions.sort((a, b) => {
+        const amountA = parseFloat(a.amount.replace('$', '').replace(',', '')) || 0;
+        const amountB = parseFloat(b.amount.replace('$', '').replace(',', '')) || 0;
+        return amountB - amountA; // Sort descending by transaction amount
+      });
+
+      setTransactions(uniqueTransactions);
+    } catch (err) {
+      setTransactions([]); // Clear transactions if none are found
+      setError(err.message);
+    }
   };
 
-  const openMeteoAPI = 'https://api.open-meteo.com/v1/forecast';
-  const geocodingAPI = 'https://geocoding-api.open-meteo.com/v1/search';
-  const nasaAPI = 'https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY';
-  const restCountriesAPI = 'https://restcountries.com/v3.1/name/';
+  // Handle representative button click
+  const handleRepClick = (repName) => {
+    setRepresentative(repName);
+    fetchTransactions(repName);
+  };
 
-  // Memoize handleCityClick to ensure stable reference
-  const handleCityClick = useCallback((cityName) => {
-    setCurrentCity(cityName);
-    const { latitude, longitude } = cities[cityName];
-    fetchWeatherData(latitude, longitude);
+  // Handle custom representative addition via input + button
+  const handleAddRepresentative = () => {
+    if (!repInput.trim()) {
+      setError('Please enter a valid representative name.');
+      return;
+    }
+
+    setCustomRepresentatives([...customRepresentatives, repInput.trim()]);
+    handleRepClick(repInput.trim());
+    setRepInput('');
+  };
+
+  // Load default representative's transactions on initial render
+  useEffect(() => {
+    handleRepClick('Nancy Pelosi');
   }, []);
 
-  // Fetch weather data
-  const fetchWeatherData = async (latitude, longitude) => {
-    try {
-      setError('');
-      const response = await fetch(
-        `${openMeteoAPI}?latitude=${latitude}&longitude=${longitude}&hourly=temperature_2m`
-      );
-      if (!response.ok) throw new Error('Failed to fetch weather data.');
-      const data = await response.json();
-      setWeatherData(data.hourly.temperature_2m.slice(0, 12));
-    } catch (err) {
-      setError(err.message);
-    }
+  // Prepare data for visualization (Bar Chart)
+  const barChartData = {
+    labels: transactions.map((transaction) => transaction.ticker),
+    datasets: [
+      {
+        label: 'Transaction Amount ($)',
+        data: transactions.map((transaction) =>
+          parseFloat(transaction.amount.replace('$', '').replace(',', '')) || 0
+        ),
+        backgroundColor: 'rgba(75,192,192,0.6)',
+        borderColor: 'rgba(75,192,192,1)',
+        borderWidth: 1,
+        maxBarThickness: 30, // Ensures consistent bar size
+      },
+    ],
   };
-
-  // Fetch NASA Astronomy Picture of the Day
-  const fetchAstronomyData = async () => {
-    try {
-      setError('');
-      const response = await fetch(nasaAPI);
-      if (!response.ok) throw new Error('Failed to fetch NASA data.');
-      const data = await response.json();
-      setAstronomyData(data);
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  // Fetch country information using REST Countries API
-
-  // Add custom city
-  const handleAddCity = async () => {
-    if (!cityInput.trim()) return;
-
-    try {
-      setError('');
-      const response = await fetch(`${geocodingAPI}?name=${cityInput.trim()}`);
-      if (!response.ok) throw new Error('Failed to fetch city coordinates.');
-      const data = await response.json();
-
-      if (data.results && data.results.length > 0) {
-        const { latitude, longitude } = data.results[0];
-        setCustomCities([...customCities, { name: cityInput.trim(), latitude, longitude }]);
-        setCurrentCity(cityInput.trim());
-        fetchWeatherData(latitude, longitude);
-        setCityInput('');
-      } else {
-        throw new Error(`Could not find weather for "${cityInput.trim()}".`);
-      }
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  // Load Austin's weather and NASA image on initial render
-  useEffect(() => {
-    handleCityClick('Austin');
-    fetchAstronomyData();
-  }, [handleCityClick]); // Include memoized function in dependency array
 
   return (
     <div style={{ fontFamily: 'Arial', padding: '20px', backgroundColor: '#f9f9f9' }}>
-      <h1 style={{ color: '#4CAF50' }}>Weather & Astronomy App</h1>
+      <h1 style={{ color: '#4CAF50', marginBottom: '20px' }}>House Stock Watcher</h1>
 
-      {/* City Buttons */}
+      {/* Representative Buttons */}
       <div>
-        {Object.keys(cities).map((city) => (
+        {defaultRepresentatives.map((rep) => (
           <button
-            key={city}
-            onClick={() => handleCityClick(city)}
+            key={rep}
+            onClick={() => handleRepClick(rep)}
             style={{
               marginRight: '10px',
               padding: '10px',
-              backgroundColor: currentCity === city ? '#4CAF50' : '#f0f0f0',
+              backgroundColor: representative === rep ? '#4CAF50' : '#f0f0f0',
               borderRadius: '5px',
               cursor: 'pointer',
             }}
           >
-            {city}
+            {rep}
           </button>
         ))}
-        {customCities.map((customCity) => (
+        {customRepresentatives.map((customRep) => (
           <button
-            key={customCity.name}
-            onClick={() => handleCityClick(customCity.name)}
+            key={customRep}
+            onClick={() => handleRepClick(customRep)}
             style={{
               marginRight: '10px',
               padding: '10px',
-              backgroundColor: currentCity === customCity.name ? '#4CAF50' : '#f0f0f0',
+              backgroundColor: representative === customRep ? '#4CAF50' : '#f0f0f0',
               borderRadius: '5px',
               cursor: 'pointer',
             }}
           >
-            {customCity.name}
+            {customRep}
           </button>
         ))}
       </div>
 
-      {/* Add Custom City */}
-      <div style={{ marginTop: '20px' }}>
+      {/* Input Field and Add Button */}
+      <div style={{ marginTop: '20px', display: 'flex', alignItems: 'center', maxWidth: '400px' }}>
         <input
           type="text"
-          value={cityInput}
-          onChange={(e) => setCityInput(e.target.value)}
-          placeholder="Enter city name"
-          style={{ padding: '10px', marginRight: '10px', width: '200px' }}
+          value={repInput}
+          onChange={(e) => setRepInput(e.target.value)}
+          placeholder="Enter Representative Name"
+          style={{ padding: '10px', flexGrow: 1 }}
         />
-        <button onClick={handleAddCity} style={{ padding: '10px', cursor: 'pointer' }}>
+        <button onClick={handleAddRepresentative} style={{ padding: '10px', marginLeft: '10px', cursor: 'pointer' }}>
           +
         </button>
       </div>
@@ -143,33 +152,57 @@ function App() {
       {/* Error Message */}
       {error && <p style={{ color: 'red', marginTop: '20px' }}>{error}</p>}
 
-      {/* Weather Data Visualization */}
-      <div style={{ marginTop: '20px' }}>
-        <h2>Hourly Forecast for {currentCity}</h2>
-        <Line
-          data={{
-            labels: Array.from({ length: weatherData.length }, (_, i) => `${i + 1}:00`),
-            datasets: [
-              {
-                label: 'Temperature (°C)',
-                data: weatherData,
-                fill: false,
-                backgroundColor: '#4CAF50',
-                borderColor: '#4CAF50',
+      {/* Transactions Visualization */}
+      <div style={{ marginTop: '20px', height: "500px", width:"100%" }}>
+        <h2>{representative ? `Stock Transactions for ${representative}` : ''}</h2>
+        {transactions.length > 0 ? (
+          <Bar
+            data={barChartData}
+            options={{
+              indexAxis: 'y', // Horizontal orientation
+              plugins: {
+                legend: { display: false }, // Hide legend for simplicity
+                tooltip: { callbacks: { label: (context) => `$${context.raw.toLocaleString()}` } },
               },
-            ],
-          }}
-        />
+              responsive:true,
+              maintainAspectRatio:false,
+              scales:{
+                x:{
+                  ticks:{beginAtZero:true},
+                },
+                y:{
+                  ticks:{font:{size:"12"}},
+                }
+              }
+            }}
+          />
+        ) : (
+          representative && <p>No transactions found for {representative}.</p>
+        )}
       </div>
 
-      {/* Astronomy Data */}
-      {astronomyData && (
-        <div>
-          <h2>Astronomy Picture of the Day</h2>
-          <img src={astronomyData.url} alt={astronomyData.title} style={{ width: '100%' }} />
-          <p>{astronomyData.explanation}</p>
-        </div>
-      )}
+      {/* Recent Transactions Section */}
+      <div style={{ marginTop: "6%" }}>
+        <h3>Recent Great Buys</h3>
+        <table style={{ width:"100%", borderCollapse:"collapse", marginTop:"15px" }}>
+          <thead>
+            <tr style={{ backgroundColor:"#f0f0f0", textAlign:"left" }}>
+              <th style={{ padding:"10px", borderBottom:"2px solid #ddd" }}>Stock</th>
+              <th style={{ padding:"10px", borderBottom:"2px solid #ddd" }}>Amount</th>
+              <th style={{ padding:"10px", borderBottom:"2px solid #ddd" }}>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {transactions.slice(0,5).map((transaction,index)=>(
+              <tr key={index} style={{ borderBottom:"1px solid #ddd" }}>
+                <td style={{ padding:"10px" }}>{transaction.ticker}</td>
+                <td style={{ padding:"10px" }}>${transaction.amount}</td>
+                <td style={{ padding:"10px" }}>{transaction.transaction_date}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
