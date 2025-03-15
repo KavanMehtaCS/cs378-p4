@@ -196,7 +196,7 @@ function App() {
             {transactions.slice(0,5).map((transaction,index)=>(
               <tr key={index} style={{ borderBottom:"1px solid #ddd" }}>
                 <td style={{ padding:"10px" }}>{transaction.ticker}</td>
-                <td style={{ padding:"10px" }}>${transaction.amount}</td>
+                <td style={{ padding:"10px" }}>{transaction.amount}</td>
                 <td style={{ padding:"10px" }}>{transaction.transaction_date}</td>
               </tr>
             ))}
